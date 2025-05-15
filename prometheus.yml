@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'flink'
+    static_configs:
+      - targets: ['host.docker.internal:9249']
+
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:5555']
+
+  - job_name: 'zookeeper'
+    static_configs:
+      - targets: ['zookeeper:5556']
+
+  - job_name: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ['minio:9000']

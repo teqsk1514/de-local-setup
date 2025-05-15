@@ -1,0 +1,182 @@
+version: '3.8'
+
+services:
+  # ------------------ MongoDB Sharded Cluster ------------------
+  configsvr01:
+    image: mongo:6.0
+    container_name: configsvr01
+    command: --configsvr --replSet configReplSet --port 27019
+    ports:
+      - 27019:27019
+    volumes:
+      - configdb:/data/db
+
+  shard01:
+    image: mongo:6.0
+    container_name: shard01
+    command: --shardsvr --replSet shard01ReplSet --port 27018
+    ports:
+      - 27018:27018
+    volumes:
+      - shard01db:/data/db
+
+  shard02:
+    image: mongo:6.0
+    container_name: shard02
+    command: --shardsvr --replSet shard02ReplSet --port 27020
+    ports:
+      - 27020:27020
+    volumes:
+      - shard02db:/data/db
+
+  mongos:
+    image: mongo:6.0
+    container_name: mongos
+    depends_on:
+      - configsvr01
+      - shard01
+      - shard02
+    ports:
+      - 27017:27017
+    volumes:
+      - ./mongos.conf:/etc/mongos.conf:ro
+    entrypoint: >
+      bash -c "
+        echo 'Waiting for config server to initialize...';
+        sleep 15;
+        mongos --config /etc/mongos.conf;
+      "
+
+  mongodb_exporter:
+    image: percona/mongodb_exporter:0.40
+    container_name: mongodb_exporter
+    ports:
+      - 9216:9216
+    environment:
+      - MONGODB_URI=mongodb://mongos:27017
+    depends_on:
+      - mongos
+
+  # ------------------ Kafka Ecosystem ------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+      - "5556:5556"
+    volumes:
+      - ./jmx_exporter_zk.yml:/etc/jmx_exporter/config.yml
+      - ./jmx_prometheus_javaagent.jar:/opt/jmx_exporter/jmx_prometheus_javaagent.jar
+    command: >
+      bash -c 'export JMX_OPTS="-javaagent:/opt/jmx_exporter/jmx_prometheus_javaagent.jar=5556:/etc/jmx_exporter/config.yml" && /etc/confluent/docker/run'
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "5555:5555"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    volumes:
+      - ./jmx_exporter_kafka.yml:/etc/jmx_exporter/config.yml
+      - ./jmx_prometheus_javaagent.jar:/opt/jmx_exporter/jmx_prometheus_javaagent.jar
+    command: >
+      bash -c 'export KAFKA_JMX_OPTS="-javaagent:/opt/jmx_exporter/jmx_prometheus_javaagent.jar=5555:/etc/jmx_exporter/config.yml" && /etc/confluent/docker/run'
+
+  connect:
+    image: confluentinc/cp-kafka-connect:7.4.0
+    hostname: connect
+    container_name: connect
+    depends_on:
+      - kafka
+      - mongos
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "kafka:29092"
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: "connect-cluster"
+      CONNECT_CONFIG_STORAGE_TOPIC: "connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "connect-status"
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.storage.StringConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.storage.StringConverter"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "connect"
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/etc/kafka-connect/jars"
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+    volumes:
+      - ./connect-plugins:/etc/kafka-connect/jars
+
+  # ------------------ UI & Monitoring ------------------
+  akhq:
+    image: tchiotludo/akhq:latest
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            local:
+              properties:
+                bootstrap.servers: "kafka:29092"
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+
+  createbucket:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+        sleep 5; \
+        mc alias set local http://minio:9000 minioadmin minioadmin; \
+        mc mb -p local/my-bucket; \
+        mc policy set public local/my-bucket; \
+        exit 0;
+      "
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: always
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    restart: always
+
+volumes:
+  configdb:
+  shard01db:
+  shard02db:

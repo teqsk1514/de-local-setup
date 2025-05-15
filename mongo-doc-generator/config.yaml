@@ -1,0 +1,18 @@
+mongo_uri: "mongodb://localhost:27017"
+rps: 1
+document_size: 4024
+mode: "long_running"   # or "benchmark"
+duration_seconds: 60   # ignored if mode is "long_running"
+
+db_collection_map:
+  inventory:
+    - products
+    - orders
+    - customers
+    - suppliers
+    - shipments
+    - transactions
+    - reviews
+    - payments
+    - invoices
+    - returns
