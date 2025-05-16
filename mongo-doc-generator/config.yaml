@@ -1,18 +1,28 @@
 mongo_uri: "mongodb://localhost:27017"
-rps: 1
-document_size: 4024
+rps: 10
+document_size: 1024
 mode: "long_running"   # or "benchmark"
-duration_seconds: 60   # ignored if mode is "long_running"
+duration_seconds: 60   # ignored in long_running mode
+
+operations:
+  insert: 0.3
+  update: 0.6
+  delete: 0.1
 
 db_collection_map:
-  inventory:
+  client_a:
     - products
     - orders
     - customers
-    - suppliers
-    - shipments
-    - transactions
-    - reviews
-    - payments
-    - invoices
-    - returns
+  client_b:
+    - products
+    - orders 
+    - customers
+  client_c:
+    - products
+    - orders
+    - customers
+  client_d:
+    - products
+    - orders
+    - customers
