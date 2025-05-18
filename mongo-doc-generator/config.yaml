@@ -1,5 +1,5 @@
 mongo_uri: "mongodb://localhost:27017"
-rps: 10
+rps: 1
 document_size: 1024
 mode: "long_running"   # or "benchmark"
 duration_seconds: 60   # ignored in long_running mode
